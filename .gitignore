@@ -1,0 +1,8 @@
+edr
+network
+filer
+
+*.o
+*.a
+
+*.skel.h
