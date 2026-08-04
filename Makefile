@@ -13,8 +13,8 @@ edr.bpf.o: edr.bpf.c vmlinux.h
 edr.bpf.skel.h: edr.bpf.o
 	bpftool gen skeleton edr.bpf.o > edr.bpf.skel.h
 
-edr: edr.c edr.bpf.skel.h
-	gcc -g -O2 edr.c -lbpf -lelf -lz -o edr
+edr: edr.c response.c edr.bpf.skel.h filer.bpf.skel.h
+	gcc -g -O2 edr.c response.c -lbpf -lelf -lz -o edr
 
 
 

@@ -18,13 +18,13 @@ static int handle_event(void *ctx,void *data,size_t data_sz){
 
 	char flag_str[256];
 	const struct filer_event *e = data;
+	int is_write = (e->flags & O_ACCMODE) == O_WRONLY ||
+		       (e->flags & O_ACCMODE) == O_RDWR;
 	decode_flags(e->flags,flag_str,sizeof(flag_str));
 	printf("[FILE] PID: %-6d | Comm: %-16s | Fisier: %s | Flags:%s!\n",
 			e->pid, e->comm,e->filename,flag_str);
-
 	return 0;
 }
-
 void decode_flags(int flags, char *buf,size_t len){
 	buf[0]='\0';
 
