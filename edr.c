@@ -5,10 +5,16 @@
 #include <unistd.h>
 #include <bpf/libbpf.h>
 #include <time.h>
-#include "edr.bpf.skel.h"
+
 #include "uthash.h"
+
+#include "edr.bpf.skel.h"
 #include "filer.bpf.skel.h"
+#include "network.bpf.skel.h"
+
 #include "response.h"
+#include "whitelisting.h"
+
 #include <fcntl.h>
 #include <string.h>
 #define MAX_WRITES_ALLOWED 20
@@ -20,6 +26,9 @@ struct event{
 	int suspicious_writes_count;
 	int locked_extensions_count;
 	time_t first_seen;
+};
+struct exit_event{
+	__u32 pid;
 };
 struct process_entry{
 	__u32 pid;
@@ -33,6 +42,9 @@ struct process_entry{
 	char last_file[256];
 	time_t window_start;
 	time_t window_actual;
+
+	time_t last_sensitive_read_time;
+	char last_sensitive_read_file[256];
 };
 struct filer_event{
 	__u32 pid;
@@ -41,42 +53,58 @@ struct filer_event{
 	__u32 flags;
 };
 
-static const char *WHITE_LISTED_PROC[]={
-	"/proc/",
-	"/sys/",
-	"/tmp/",
-	"/var/log/",
-	"/home/laurentiu/.cache/",
-	"/home/laurentiu/.local/share/tracker/3",
-	NULL
-};
-static const char *WHITE_LISTED_COMM[]={
-	"ThreadPoolForeg",
-	"CompositorTileW",
-	"Chrome_IOThread",
-	"chrome",
-	NULL
+struct network_event{
+	__u32 pid;
+	char comm[16];
+	__u16 family;
+	__u16 port;
+	__u32 ip4;
+	__u8 ip6[16];
+	__u8 protocol;
 };
 
 struct process_entry *users = NULL;
-int is_comm_whitelisted(const char *comm);
-int is_path_whitelisted(const char *filename);
+
 static int handle_event(void *ctx,void *data,size_t data_sz){
 	const struct event *e = data;
-	printf("[EDR] proces nou detectat :PID:%d  PPID:%d  Commanda:%s\n",e->pid,e->ppid,e->comm);
+	printf("[EDR]{START} proces nou detectat :PID:%d  PPID:%d  Commanda:%s\n",e->pid,e->ppid,e->comm);
 	add_or_update_process(e->pid,e->ppid,e->comm);
 	//print_process
+	return 0;
+}
+static int exit_handle_event(void *ctx,void *data,size_t data_sz){
+	const struct exit_event *e = data;
+	struct process_entry *s;
+	HASH_FIND_INT(users,&e->pid,s);
+	if(s != NULL){
+		printf("[EDR]{EXIT} proces scos: PID %d\n",e->pid);
+		HASH_DEL(users,s);
+		free(s);
+	}
 	return 0;
 }
 static int handle_file_event(void *ctx,void *data,size_t data_sz){
 	const struct filer_event *e = data;
 	int is_write= (e->flags & O_ACCMODE) == O_WRONLY ||
 		      (e->flags & O_ACCMODE) == O_RDWR;
+	int is_read = (e->flags & O_ACCMODE) == O_RDONLY ||
+		      (e->flags & O_ACCMODE) == O_RDWR;
 	if(is_write){
 		register_file_write(e->pid,e->comm,e->filename);
 	}
+	if(is_read){
+		register_sensitive_read(e->pid,e->comm,e->filename);
+	}
 	return 0;
 }
+static int handle_network_event(void *ctx,void *data,size_t data_sz){
+	const struct network_event *e = data;
+
+
+
+	return 0;
+}
+
 void register_file_write(__u32 pid,const char *comm,const char *filename){
 	struct process_entry *s;
 	HASH_FIND_INT(users,&pid,s);
@@ -97,12 +125,32 @@ void register_file_write(__u32 pid,const char *comm,const char *filename){
 	s->modified_files_count++;
 	snprintf(s->last_file,sizeof(s->last_file),"%s",filename);
 	s->window_actual = now;
-	if(s->suspicious_writes_count > MAX_WRITES_ALLOWED && !is_path_whitelisted(s->last_file)){
+	if(s->suspicious_writes_count > MAX_WRITES_ALLOWED && !is_path_whitelisted(s->last_file) && !is_comm_whitelisted(s->comm)){
 		printf("[ALERTA] Pid:%d (%s) a scris %d fisiere in %d secunde! Posibil RANSOMWARE!\n",
 				pid,comm,s->suspicious_writes_count,TIME_WINDOW_SEC);
 		quarantine_process(pid,s->comm);
 	}
 }
+void register_sensitive_read(__u32 pid ,const char *comm,const char *filename){
+	if(!is_sensitive_path(filename)){
+		return;
+	}
+	if(!is_comm_whitelisted(comm)){
+		return;
+	}
+	struct process_entry *s;
+	HASH_FIND_INT(users,&pid,s);
+	if(s==NULL){
+		s = calloc(1,sizeof(*s));
+		s->pid = pid;
+		snprintf(s->comm,sizeof(s->comm),"%s",comm);
+		HASH_ADD_INT(users,pid,s);
+	}
+	s->last_sensitive_read_time = time(NULL);
+	snprintf(s->last_sensitive_read_file,sizeof(s->last_sensitive_read_file),"%s",filename);
+	printf("[SPYWARE_WATCH] pid:%d (%s) a citit fisier sensibil:%s !\n",pid,comm,filename);
+}
+
 void print_process(){
 	struct process_entry *s,*tmp;
 	printf("\n------Stare actuala HASHMAP---------");
@@ -137,9 +185,11 @@ void add_or_update_process(__u32 pid,__u32 ppid,const char *comm){
 int main(int argc,char **argv){
 	struct edr_bpf *skel;
 	struct filer_bpf *filer_skel;
+	struct network_bpf *network_skel;
 	struct ring_buffer *rb = NULL;
+	struct ring_buffer *exit_rb = NULL;
 	int err;
-	setvbuf(stdout,NULL,_IONBF,0);
+	setvbuf(stdout,NULL,_IOLBF,0);
 	// EDR
 	skel = edr_bpf__open_and_load();
 	if(!skel){
@@ -163,6 +213,19 @@ int main(int argc,char **argv){
 		fprintf(stderr,"[EDR]Erroare la atasare programului eBPF din filer!\n");
 		return 1;
 	}
+	//NETWORK
+	
+	network_skel = network_bpf__open_and_load();
+	if(!network_skel){
+		fprintf(stderr,"[EDR]Erroare la deschiderea si incarcarea [rpgramului eBPF din network!\n");
+		return 1;
+	}
+	err = network_bpf__attach(network_skel);
+	if(err){
+		fprintf(stderr,"[EDR] Erroare la atasare programului eBPF din network!\n");
+		return 1;
+	}
+
 	
 	//Ring buffer
 	rb = ring_buffer__new(bpf_map__fd(skel->maps.rb),handle_event,NULL,NULL);
@@ -176,6 +239,17 @@ int main(int argc,char **argv){
 		fprintf(stderr,"[EDR] erroare de atasare file_skel!\n");
 		goto cleanup;
 	}
+	err = ring_buffer__add(rb,bpf_map__fd(network_skel->maps.rb),handle_network_event,NULL);
+	if(err){
+		fprintf(stderr,"[EDR] erroare la atasare network_skel!\n");
+		goto cleanup;
+	}
+	err = ring_buffer__add(rb,bpf_map__fd(skel->maps.exit_rb),exit_handle_event,NULL);
+	if(err){
+		fprintf(stderr,"[EDR] erroare la atasare Exit_RingBuffer !\n");
+		goto cleanup;
+	}
+
 	printf("[EDR] a pornit cu succes!\n");
 	while(1){
 		err = ring_buffer__poll(rb,100);
@@ -190,6 +264,7 @@ cleanup:
 	ring_buffer__free(rb);
 	edr_bpf__destroy(skel);
 	filer_bpf__destroy(filer_skel);
+	network_bpf__destroy(network_skel);
 	if(err<0){
 		err = -errno;
 	}else{
@@ -202,25 +277,6 @@ cleanup:
 
 
 
-
-
-
-int is_path_whitelisted(const char *filename){
-	for(int i = 0;WHITE_LISTED_PROC[i]!=NULL;i++){
-		if(strncmp(filename,WHITE_LISTED_PROC[i],strlen(WHITE_LISTED_PROC[i]))==0){
-			return 1;
-		}
-	}
-	return 0;
-}
-int is_comm_whitelisted(const char *comm){
-	for(int i=0;WHITE_LISTED_COMM[i];i++){
-		if(strncmp(comm,WHITE_LISTED_COMM[i],strlen(WHITE_LISTED_COMM[i]))==0){
-			return 1;
-		}
-	}
-	return 0;
-}
 
 
 

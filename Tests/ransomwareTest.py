@@ -4,7 +4,7 @@ import sys
 import os
 
 N_WRITES = 50
-DELAY = 0.05
+DELAY = 0.01
 
 def main():
     print(f"[TEST][RANSOMWARE] scriu de {N_WRITES} in {DELAY} secunde")
