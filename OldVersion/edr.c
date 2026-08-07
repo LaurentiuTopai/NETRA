@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <bpf/libbpf.h>
 #include <time.h>
-
+#include <arpa/inet.h>
 #include "uthash.h"
 
 #include "edr.bpf.skel.h"
@@ -17,8 +17,12 @@
 
 #include <fcntl.h>
 #include <string.h>
+
+
 #define MAX_WRITES_ALLOWED 20
 #define TIME_WINDOW_SEC 1
+#define SPYWARE_EXFIL_WINDOW_SEC 10
+
 struct event{
 	__u32 pid;
 	__u32 ppid;
@@ -34,6 +38,8 @@ struct process_entry{
 	__u32 pid;
 	__u32 ppid;
 	char comm[16];
+
+	//file activity
 	int modified_files_count;
 	int suspicious_writes_count;
 	int locked_extensions_count;
@@ -42,9 +48,17 @@ struct process_entry{
 	char last_file[256];
 	time_t window_start;
 	time_t window_actual;
-
+	
+	//sensitive files
 	time_t last_sensitive_read_time;
 	char last_sensitive_read_file[256];
+
+	//network
+	time_t last_network_time;
+	__u16 last_family;
+	__u16 last_port;
+	__u32 last_ip4;
+	__u8 last_ip6[16];
 };
 struct filer_event{
 	__u32 pid;
@@ -67,7 +81,7 @@ struct process_entry *users = NULL;
 
 static int handle_event(void *ctx,void *data,size_t data_sz){
 	const struct event *e = data;
-	printf("[EDR]{START} proces nou detectat :PID:%d  PPID:%d  Commanda:%s\n",e->pid,e->ppid,e->comm);
+	printf("[EDR]{START} proces nou detectat :PID:%u  PPID:%u  Commanda:%s\n",e->pid,e->ppid,e->comm);
 	add_or_update_process(e->pid,e->ppid,e->comm);
 	//print_process
 	return 0;
@@ -77,7 +91,7 @@ static int exit_handle_event(void *ctx,void *data,size_t data_sz){
 	struct process_entry *s;
 	HASH_FIND_INT(users,&e->pid,s);
 	if(s != NULL){
-		printf("[EDR]{EXIT} proces scos: PID %d\n",e->pid);
+		printf("[EDR]{EXIT} proces scos: PID %u\n",e->pid);
 		HASH_DEL(users,s);
 		free(s);
 	}
@@ -99,12 +113,35 @@ static int handle_file_event(void *ctx,void *data,size_t data_sz){
 }
 static int handle_network_event(void *ctx,void *data,size_t data_sz){
 	const struct network_event *e = data;
+	struct process_entry *s;
+	HASH_FIND_INT(users,&e->pid,s);
+	if(s==NULL){
+		s = calloc(1,sizeof(*s));
+		s->pid = e->pid;
+		snprintf(s->comm,sizeof(s->comm),"%s",e->comm);
+		HASH_ADD_INT(users,pid,s);
+	}
+	time_t now = time(NULL);
+	s->last_network_time = time;
+	s->last_family = e->family;
+	s->last_port = e->port;
+	s->last_ip4 = e->ip4;
+	memcpy(s->last_ip6,e->ip6,sizeof(s->last_ip6));
 
+	if(s->last_sensitive_read_time > 0 && (now - s->last_sensitive_read_time) <=SPYWARE_EXFIL_WINDOW_SEC){
+		char ip_str[INET6_ADDRSTRLEN] = {0};
+		if(e->family == 2){
+			inet_ntop(AF_INET,&e->ip4,ip_str,sizeof(ip_str));
+		}else if (e->family == 10){
+			inet_ntop(AF_INET6,&e->ip6,ip_str,sizeof(ip_str));
+		}
 
-
+		printf("[SPYWARE_WATCH] pid:%u (%s) a citit fisier sensibil %s acum %ld secunde\n",
+				s->pid,s->comm,s->last_sensitive_read_file,(now - s->last_sensitive_read_time));
+		quarantine_process(s->pid,s->comm);	
+	}
 	return 0;
 }
-
 void register_file_write(__u32 pid,const char *comm,const char *filename){
 	struct process_entry *s;
 	HASH_FIND_INT(users,&pid,s);
@@ -126,7 +163,7 @@ void register_file_write(__u32 pid,const char *comm,const char *filename){
 	snprintf(s->last_file,sizeof(s->last_file),"%s",filename);
 	s->window_actual = now;
 	if(s->suspicious_writes_count > MAX_WRITES_ALLOWED && !is_path_whitelisted(s->last_file) && !is_comm_whitelisted(s->comm)){
-		printf("[ALERTA] Pid:%d (%s) a scris %d fisiere in %d secunde! Posibil RANSOMWARE!\n",
+		printf("[ALERTA] Pid:%u (%s) a scris %d fisiere in %u secunde! Posibil RANSOMWARE!\n",
 				pid,comm,s->suspicious_writes_count,TIME_WINDOW_SEC);
 		quarantine_process(pid,s->comm);
 	}
@@ -135,7 +172,7 @@ void register_sensitive_read(__u32 pid ,const char *comm,const char *filename){
 	if(!is_sensitive_path(filename)){
 		return;
 	}
-	if(!is_comm_whitelisted(comm)){
+	if(is_comm_whitelisted(comm)){
 		return;
 	}
 	struct process_entry *s;
@@ -148,14 +185,14 @@ void register_sensitive_read(__u32 pid ,const char *comm,const char *filename){
 	}
 	s->last_sensitive_read_time = time(NULL);
 	snprintf(s->last_sensitive_read_file,sizeof(s->last_sensitive_read_file),"%s",filename);
-	printf("[SPYWARE_WATCH] pid:%d (%s) a citit fisier sensibil:%s !\n",pid,comm,filename);
+	printf("[SPYWARE_WATCH] pid:%u (%s) a citit fisier sensibil:%s !\n",pid,comm,filename);
 }
 
 void print_process(){
 	struct process_entry *s,*tmp;
 	printf("\n------Stare actuala HASHMAP---------");
 	HASH_ITER(hh,users,s,tmp){
-		printf("In HASHMAP: PID:%d | PPID:%d, | Total_Accesari:%d | Nume:%s\n",
+		printf("In HASHMAP: PID:%u | PPID:%u, | Total_Accesari:%u | Nume:%s\n",
 				s->pid,s->ppid,s->modified_files_count,s->comm);
 	}
 }

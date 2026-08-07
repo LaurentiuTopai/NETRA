@@ -25,7 +25,8 @@ struct event{
 	char comm[TASK_COMM_LEN];
 
 };
-
+const struct event *unused_event __attribute__((unused));
+const struct exit_event *unused_exit_event __attribute__((unused));
 SEC("tp/syscalls/sys_exit_execve")
 int handle_execve_exit(struct trace_event_raw_sys_exit *ctx){
 	if(ctx->ret != 0){

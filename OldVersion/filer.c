@@ -21,7 +21,7 @@ static int handle_event(void *ctx,void *data,size_t data_sz){
 	int is_write = (e->flags & O_ACCMODE) == O_WRONLY ||
 		       (e->flags & O_ACCMODE) == O_RDWR;
 	decode_flags(e->flags,flag_str,sizeof(flag_str));
-	printf("[FILE] PID: %-6d | Comm: %-16s | Fisier: %s | Flags:%s!\n",
+	printf("[FILE] PID: %-6u | Comm: %-16s | Fisier: %s | Flags:%s!\n",
 			e->pid, e->comm,e->filename,flag_str);
 	return 0;
 }

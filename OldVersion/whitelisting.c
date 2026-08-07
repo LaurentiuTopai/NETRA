@@ -17,6 +17,8 @@ static const char *WHITE_LISTED_COMM[]={
 	"CompositorTileW",
 	"Chrome_IOThread",
 	"chrome",
+	"firefox",
+	"brave",
 	"zsh",
 	"tracker-miner-f",
 	"tracker-extract",

@@ -3,25 +3,36 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+
+	"edr-agent/pkg/agent"
 )
 
-// App struct
 type App struct {
 	ctx context.Context
 }
 
-// NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Porneste EDR-ul in background si ii dam contextul Wails
+	go func() {
+		if err := agent.Start(ctx); err != nil {
+			log.Printf("EDR a intampinat o eroare: %v", err)
+		}
+	}()
 }
 
-// Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
+}
+
+// Am sters simularea (StartScan) pentru ca acum folosim motorul EDR real
+func (a *App) StartScan() {
+	// Poti porni/opri eventuale flag-uri de scanare aici in viitor
+	fmt.Println("Scanare UI apasata. Motorul eBPF ruleaza deja in background.")
 }

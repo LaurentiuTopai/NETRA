@@ -19,6 +19,9 @@ struct{
 
 
 }rb SEC(".maps");
+const struct filer_event *unused_filer_event __attribute__((unused));
+
+
 
 SEC("tp/syscalls/sys_enter_openat")
 int handle_openat(struct trace_event_raw_sys_enter *ctx){

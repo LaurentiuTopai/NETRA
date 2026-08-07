@@ -6,3 +6,7 @@ filer
 *.a
 
 *.skel.h
+
+# Binare de test/compilate local
+test_build
+edr-agent

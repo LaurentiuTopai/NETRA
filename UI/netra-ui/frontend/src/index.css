@@ -1,41 +1,65 @@
 @import "tailwindcss";
 
 @theme {
-  --color-cyber-yellow: #eab308;
-  --color-cyber-dark: #000000;
-  --color-cyber-gray: #0a0a0a;
+  --color-term-yellow: #ffb000;
+  --color-term-black: #000000;
+  --color-term-gray: #1a1a1a;
+  --color-term-alert: #ff0000;
+  --color-term-orange: #ff8c00;
+  --color-term-ok: #00ff00;
 }
 
 body {
   margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: var(--color-cyber-dark);
-  color: #e2e8f0;
+  font-family: 'Courier New', Courier, monospace;
+  background-color: var(--color-term-black);
+  color: var(--color-term-yellow);
+  -webkit-font-smoothing: none;
+}
+
+/* When scanning, the primary color changes to a navy/terminal blue */
+.scanning-mode {
+  --color-term-yellow: #3b82f6; /* A terminal-readable bright navy/blue */
 }
 
 @layer utilities {
-  .glow-text {
-    text-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+  .term-glow {
+    text-shadow: 0 0 4px color-mix(in srgb, var(--color-term-yellow) 60%, transparent);
   }
-  .glow-border {
-    box-shadow: 0 0 15px rgba(234, 179, 8, 0.2);
+  .term-border {
+    border: 1px solid var(--color-term-yellow);
   }
-  .glass-panel {
-    background: rgba(10, 10, 10, 0.8);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(234, 179, 8, 0.15);
+  .term-border-glow {
+    border: 1px solid var(--color-term-yellow);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-term-yellow) 40%, transparent), 
+                inset 0 0 8px color-mix(in srgb, var(--color-term-yellow) 20%, transparent);
   }
-  /* Console scanline effect */
-  .scanlines {
-    background: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0),
-      rgba(255, 255, 255, 0) 50%,
-      rgba(0, 0, 0, 0.2) 50%,
-      rgba(0, 0, 0, 0.2)
-    );
-    background-size: 100% 4px;
+  .term-button {
+    background: var(--color-term-black);
+    color: var(--color-term-yellow);
+    border: 1px solid var(--color-term-yellow);
+    transition: all 0.1s;
+    cursor: pointer;
+  }
+  .term-button:hover {
+    background: var(--color-term-yellow);
+    color: var(--color-term-black);
+  }
+  .term-button:active {
+    transform: translateY(2px);
+  }
+  /* Scanline effect */
+  .crt::before {
+    content: " ";
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+    z-index: 2;
+    background-size: 100% 2px, 3px 100%;
+    pointer-events: none;
   }
 }

@@ -1,80 +1,72 @@
-# NETRA — EDR/NDR bazat pe eBPF cu UI în Go (Wails)
+# NETRA — EDR/NDR bazat pe eBPF cu UI integrat în Go (Wails)
+
+![NETRA Dashboard](Images/Image1.png)
 
 ## Descriere generală
 
-NETRA este un sistem de detecție și răspuns la nivel de endpoint (EDR — *Endpoint Detection and Response*), cu extindere planificată către detecție la nivel de rețea (NDR — *Network Detection and Response*). Sistemul folosește **eBPF** pentru colectarea de evenimente direct din kernel-ul Linux (creare de procese, operații pe fișiere), un modul de **corelare și decizie în user-space (C)**, un mecanism de **răspuns automat** (izolare de proces), și o **interfață grafică desktop** construită în Go, cu ajutorul framework-ului **Wails**.
+NETRA este un sistem de detecție și răspuns la nivel de endpoint (EDR — *Endpoint Detection and Response*), cu capabilități de detecție la nivel de rețea (NDR — *Network Detection and Response*). Sistemul folosește **eBPF** pentru colectarea de evenimente direct din kernel-ul Linux (creare de procese, operații pe fișiere, conexiuni de rețea), un modul de **corelare și decizie în user-space rescris complet în Go**, un mecanism de **răspuns automat** (izolare de proces/carantină), și o **interfață grafică desktop** construită în Go, cu ajutorul framework-ului **Wails** și **React**.
 
-Proiectul este dezvoltat ca parte a lucrării de licență, cu scopul de a demonstra o arhitectură completă de detecție a comportamentului malițios (cu accent pe ransomware) — de la colectarea datelor la nivel de kernel, până la reacția automată și vizualizarea în timp real pentru utilizator.
+Proiectul este dezvoltat ca parte a lucrării de licență, cu scopul de a demonstra o arhitectură completă de detecție a comportamentului malițios — de la colectarea datelor la nivel de kernel, până la reacția automată și vizualizarea în timp real pentru utilizator.
 
 ---
 
-## Arhitectură
+## Arhitectură (Noua versiune Go-Userspace)
 
-```
+Sistemul a trecut printr-un refactoring major (de la un monolit în C pentru userspace, la o arhitectură modulară bazată pe Go). Motorul eBPF este acum compilat cu `bpf2go` și integrat direct în aplicația desktop Wails.
+
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                         KERNEL SPACE                        │
-│                                                               │
-│   edr.bpf.c              filer.bpf.c                        │
-│   (tracepoint execve)    (tracepoint openat)                │
-│         │                       │                            │
-│         └──────────┬────────────┘                            │
-│                     │  (BPF ring buffers)                    │
-└─────────────────────┼────────────────────────────────────────┘
+│                                                             │
+│   edr.bpf.c              filer.bpf.c     network.bpf.c      │
+│   (procese)              (fisiere)       (retea)            │
+│         │                       │               │           │
+│         └──────────┬────────────┴───────────────┘           │
+│                     │  (BPF ring buffers)                   │
+└─────────────────────┼───────────────────────────────────────┘
                        │
-┌─────────────────────┼────────────────────────────────────────┐
-│                  USER SPACE (C)                              │
-│                     │                                         │
-│                edr.c (orchestrator)                          │
-│         ┌───────────┼────────────┐                           │
-│         │           │            │                           │
-│   add_or_update  register_file_write                         │
-│   _process()      (detectie ransomware, fereastra de timp)   │
-│         │           │                                         │
-│         └─────hashmap (uthash)──┘                             │
-│                     │                                         │
-│              response.c (SIGSTOP / SIGKILL / forensics)      │
-└─────────────────────┼────────────────────────────────────────┘
-                       │  (planificat: JSON pe stdout / socket)
-┌─────────────────────┼────────────────────────────────────────┐
-│                GO + WAILS (UI Desktop)                       │
-│                     │                                         │
-│              collector (os/exec + parsare evenimente)        │
-│                     │                                         │
-│              UI (HTML/CSS/JS randat nativ, fara Electron)     │
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────┼───────────────────────────────────────┐
+│              USER SPACE (Go + Wails UI)                     │
+│                     │                                       │
+│          pkg/agent (bpf2go / cilium/ebpf)                   │
+│          Incarcare si atasare programe BPF                  │
+│                     │                                       │
+│          pkg/detector (Reguli de detectie)                  │
+│          - Ransomware (Scrieri multiple)                    │
+│          - Spyware (Fisiere sensibile + Exfiltrare)         │
+│          - HardwareBlock (Protectie Camera/Microfon/Difuzor)│
+│                     │                                       │
+│          pkg/events (runtime.EventsEmit)                    │
+│                     │                                       │
+│              React Frontend (App.jsx)                       │
+│              Interfata grafica real-time                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Componente
+## Componente și Funcționalități
 
-### 1. `edr.bpf.c` / `edr.c` — Detecție de procese noi
-- Program eBPF atașat pe tracepoint-ul `sys_enter_execve`.
-- Capturează PID, PPID și numele comenzii (`comm`) pentru fiecare proces nou lansat.
-- Trimite evenimentele către user-space printr-un **ring buffer** (`BPF_MAP_TYPE_RINGBUF`).
-- În user-space, evenimentele sunt stocate într-un hashmap (`uthash`), indexat după PID.
+### 1. Detecție Ransomware
+- Monitorizează scrierile masive de fișiere (`sys_enter_openat`) folosind `filer.bpf.c`.
+- Corelează evenimentele într-o fereastră de timp strictă.
+- Carantinează procesul (`SIGSTOP`) dacă pragul de fișiere modificate este depășit.
 
-### 2. `filer.bpf.c` / `filer.c` — Detecție de operații pe fișiere
-- Program eBPF atașat pe tracepoint-ul `sys_enter_openat`.
-- Capturează PID, `comm`, calea fișierului (`filename`) și flag-urile de deschidere (`O_WRONLY`, `O_RDWR`, `O_CREAT`, etc.).
-- Rulează inițial ca binar independent (`filer`), apoi integrat direct în `edr` printr-un al doilea ring buffer atașat cu `ring_buffer__add()`.
+### 2. Detecție Spyware
+- Monitorizează accesul la fișiere considerate sensibile (ex: `/etc/passwd`, `/root/`, config-uri SSH).
+- Corelează accesul sensibil cu deschiderea de conexiuni de rețea (`sys_enter_connect`, `sys_enter_sendto`) către adrese IP externe (`network.bpf.c`).
+- Oprește procesul înainte ca exfiltrarea de date să se finalizeze.
 
-### 3. Motorul de detecție (în `edr.c`)
-- Corelează evenimentele de scriere de fișiere per proces, într-o **fereastră de timp** (`TIME_WINDOW_SEC`).
-- Dacă un proces depășește un prag de scrieri (`MAX_WRITES_ALLOWED`) în interiorul ferestrei, se declanșează o alertă — comportament caracteristic ransomware-ului (criptare/rescriere în masă a fișierelor).
-- **Whitelisting** pe două niveluri, pentru reducerea fals-pozitivelor:
-  - pe **path** de fișier (ex: `/tmp/`, `/proc/`, `.cache/`) — zone care nu sunt ținte tipice de ransomware;
-  - pe **nume de proces/thread** (`comm`) — pentru procese de sistem/browser foarte active dar legitime.
+### 3. Protecție Hardware (HardwareBlockDetector)
+- Blochează și alertează în timp real încercările de acces neautorizat la periferice:
+  - **Camera Web:** `/dev/video*`, `/dev/media*`
+  - **Microfon:** `/dev/snd/pcm*c`
+  - **Difuzor:** `/dev/snd/pcm*p`
 
-### 4. `response.c` / `response.h` — Modulul de răspuns
-- La declanșarea unei alerte, procesul suspect este **izolat** (nu omorât direct) prin semnalul `SIGSTOP`, pentru a permite investigație manuală ulterioară fără a distruge dovezi sau a întrerupe brutal un posibil fals-pozitiv.
-- Prevăzut și `kill_malicious_process()` (SIGKILL), pentru cazurile confirmate.
-- Prevăzut (neimplementat încă) `dump_process_forensics()` — extragere de detalii despre proces din `/proc/<pid>/` (binar executat, linie de comandă, fișiere deschise, working directory) pentru investigație manuală.
-
-### 5. UI — Go + Wails
-- Aplicație desktop nativă (nu web, nu Electron) — randare printr-un webview nativ (WebKitGTK pe Linux).
-- Va centraliza evenimentele provenite din modulele C (EDR, viitor: NDR/network), afișându-le live utilizatorului.
-- Arhitectură plănuită: fiecare sursă de evenimente (EDR, network, viitoare module) rulează ca subproces, gestionat de un goroutine dedicat; evenimentele sunt trimise printr-un canal central Go către interfață.
+### 4. Interfața Grafică (UI)
+- Construită cu **Wails v2** (backend Go) și **React + TailwindCSS** (frontend).
+- Rulează ca o aplicație desktop nativă pe Linux.
+- Motorul eBPF este pornit automat într-un goroutine în fundal la lansarea aplicației, permițând ca evenimentele și alertele să ajungă instantaneu și reactiv pe dashboard-ul utilizatorului.
 
 ---
 
@@ -82,66 +74,51 @@ Proiectul este dezvoltat ca parte a lucrării de licență, cu scopul de a demon
 
 ```
 NETRA/
-├── edr.bpf.c            # program eBPF - detectie execve
-├── edr.c                # orchestrator user-space: hashmap, detectie, alerte
-├── filer.bpf.c           # program eBPF - detectie openat
-├── filer.c               # binar independent pentru testare filer
-├── response.c            # modul de raspuns (quarantine/kill/forensics)
-├── response.h
-├── uthash.h               # librarie hashmap (header-only)
-├── vmlinux.h              # tipuri kernel, generate pentru CO-RE
-├── Makefile
-└── UI/
-    └── netra-ui/          # proiect Wails (Go + frontend web)
-        ├── app.go
-        ├── main.go
-        ├── go.mod
-        ├── frontend/
-        └── build/bin/netra-ui   # binar compilat final
+├── kernel/                # Codul sursa C pentru eBPF
+│   ├── edr.bpf.c          
+│   ├── filer.bpf.c        
+│   └── network.bpf.c      
+├── NewVersion/            # Modulul de EDR (Go Userspace)
+│   ├── pkg/
+│   │   ├── agent/         # Entrypoint eBPF, fisiere generate (bpf2go)
+│   │   ├── detector/      # Logica de business pentru detectie
+│   │   ├── events/        # Trimitere de alerte catre Wails UI
+│   │   ├── response/      # Izolare procese, carantina
+│   │   └── store/         # State management procese
+│   └── main.go            # Entrypoint standalone (optional)
+├── UI/
+│   └── netra-ui/          # Interfata grafica (Wails)
+│       ├── app.go         # Leaga UI-ul de backend-ul eBPF
+│       ├── frontend/      # React + Tailwind (App.jsx, index.css)
+│       └── go.mod         # Importa direct NewVersion
+├── Tests/                 # Scripturi Python pentru simulare malware
+├── OldVersion/            # Versiunea veche, monolita, bazata exclusiv pe C
+├── Images/                # Resurse media pentru documentatie
+└── DEVELOPMENT_HISTORY.md # Jurnal arhitectural detaliat
 ```
 
 ---
-
-## Cerințe de sistem
-
-- Linux cu suport eBPF (kernel ≥ 5.8 recomandat pentru CO-RE)
-- `clang`, `bpftool`, `libbpf-dev`
-- Pentru UI: `Go` ≥ 1.21, `Node.js`/`npm`, `libgtk-3-dev`, `libwebkit2gtk-4.1-dev` (pe Ubuntu 24.04+, atenție la denumirea pachetului — vezi secțiunea de probleme cunoscute din istoricul de dezvoltare)
 
 ## Compilare și rulare
 
-### Partea de EDR (C/eBPF)
+### Cerințe de sistem
+- Linux cu suport eBPF (kernel ≥ 5.8 recomandat).
+- `clang`, `llvm`, `libbpf-dev` pentru compilarea BPF.
+- `Go` ≥ 1.25.
+- Wails v2: npm/Node.js, biblioteci native (ex: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`).
 
-```bash
-make clean
-make
-sudo ./edr
-```
-
-### Partea de UI (Go/Wails)
-
+### Rularea aplicației complete (cu UI)
+Pentru a porni EDR-ul integrat direct în interfața grafică:
 ```bash
 cd UI/netra-ui
-wails dev -tags webkit2_41          # development, cu hot-reload
-# sau
-wails build -tags webkit2_41        # build de productie
-./build/bin/netra-ui
+sudo wails dev
+```
+*(Notă: `sudo` este necesar deoarece atașarea programelor eBPF necesită privilegii de administrator).*
+
+Pentru a rula scripturile de testare și a vedea cum apar alertele în interfață:
+```bash
+sudo python3 Tests/spywareTest.py
 ```
 
----
-
-## Stadiu curent (versiune de lucru)
-
-- [x] Detecție procese noi (execve)
-- [x] Detecție operații de scriere pe fișiere (openat)
-- [x] Corelare pe fereastră de timp + prag de scrieri
-- [x] Whitelisting pe path și pe comm
-- [x] Răspuns automat (SIGSTOP) la depășirea pragului
-- [x] Aplicație desktop funcțională (schelet, Wails)
-- [ ] Comunicare structurată (JSON) între modulele C și UI
-- [ ] Interfață finală cu evenimente live, alerte, istoric
-- [ ] Modul NDR (network detection)
-- [ ] Forensics detaliat per proces (`/proc/<pid>/`)
-- [ ] Detecție redenumire/criptare fișiere (rename/renameat)
-
-Pentru detalii pas-cu-pas despre dezvoltare, bug-uri întâlnite și cum au fost rezolvate, vezi `DEVELOPMENT_HISTORY.md`.
+### Detalii arhitecturale și istoricul problemelor
+Puteți consulta documentul de lucru `DEVELOPMENT_HISTORY.md` pentru detalii aprofundate legate de dificultățile întâmpinate, motivul refactorizării din C în Go, fix-uri de pointeri, memory leaks și problema integrării semnalelor între Wails și EDR.
