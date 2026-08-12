@@ -23,6 +23,8 @@ type networkNetworkEvent struct {
 	Ip6      [16]uint8
 	Protocol uint8
 	_        [3]byte
+	Len      uint32
+	Data     [256]int8
 }
 
 // Names of all BPF objects in the ELF.

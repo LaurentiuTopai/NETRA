@@ -3,4 +3,8 @@
 
 export function Greet(arg1:string):Promise<string>;
 
+export function StartRealtimeScan():Promise<void>;
+
+export function StartRootkitScan():Promise<void>;
+
 export function StartScan():Promise<void>;

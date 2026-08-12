@@ -1,0 +1,1 @@
+/home/laurentiu/go/pkg/mod/github.com/cilium/ebpf@v0.22.0/btf/testdata/bpf_core_read.h

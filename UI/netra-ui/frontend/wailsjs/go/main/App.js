@@ -6,6 +6,14 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function StartRealtimeScan() {
+  return window['go']['main']['App']['StartRealtimeScan']();
+}
+
+export function StartRootkitScan() {
+  return window['go']['main']['App']['StartRootkitScan']();
+}
+
 export function StartScan() {
   return window['go']['main']['App']['StartScan']();
 }
