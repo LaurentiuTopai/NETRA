@@ -1,4 +1,4 @@
-#define __TARGET_ARCH_x86
+//#define __TARGET_ARCH_x86
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
@@ -36,7 +36,7 @@ int handle_connect(struct trace_event_raw_sys_enter *ctx) {
 		bpf_printk("Problema de alocare a memoriei ring bufferului in network!\n");
 		return 0;
 	}
-
+	__builtin_memset(e, 0, sizeof(*e));
 	__u64 id = bpf_get_current_pid_tgid();
 	e->pid = id >> 32;
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));
@@ -83,7 +83,7 @@ int handle_sendto(struct trace_event_raw_sys_enter *ctx) {
 		bpf_printk("Problema de alocare a memoriei ring bufferului in network sendto!\n");
 		return 0;
 	}
-
+	__builtin_memset(e, 0, sizeof(*e));
 	__u64 id = bpf_get_current_pid_tgid();
 	e->pid = id >> 32;
 	bpf_get_current_comm(&e->comm, sizeof(e->comm));

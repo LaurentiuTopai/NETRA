@@ -30,7 +30,7 @@ int handle_openat(struct trace_event_raw_sys_enter *ctx){
 	e = bpf_ringbuf_reserve(&rb,sizeof(*e),0);
 	if(!e){
 		bpf_printk("Problema de alocare a memoriei ring bufferului in filer!\n");
-		return 1;
+		return 0;
 	}
 	__u64 id = bpf_get_current_pid_tgid();
 	e->pid = id >>32;

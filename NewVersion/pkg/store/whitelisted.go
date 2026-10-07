@@ -38,6 +38,9 @@ var sensitivePaths = []string{
 		".ssh/id_rsa",
 		".ssh/id_ed25519",
 }
+
+//func 
+
 func IsCommWhiteListed(comm string) bool{
 	cleanComm := strings.TrimSpace(strings.Trim(comm,"\x00"))
 	return CommWhiteListed[cleanComm]

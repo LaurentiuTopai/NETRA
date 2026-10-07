@@ -39,40 +39,33 @@ func NewProcessStore()*ProcessStore{
 		processes:make(map[uint32]*ProcessEntry),
 	}
 }
-//Creaza procesul daca nu exista sau il adauga daca exista
-func (s *ProcessStore) GetOrAdd(pid uint32,ppid uint32,comm string)*ProcessEntry{
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	p,exists := s.processes[pid]
-	if !exists{
-		now := time.Now()
-		p = & ProcessEntry{
-				Pid:	pid,
-				Ppid:	ppid,
-				Comm:	comm,
-				WindowStart:	now,
-				WindowActual:	now,
-		}
-		s.processes[pid] = p
-	}else if comm != ""{
-		p.Comm = comm
-	}
-	return p
-}
 //Returneaza procesul pe baza pid-ului si daca exista in map
-func (s *ProcessStore) Get(pid uint32)(*ProcessEntry,bool){
+func (s *ProcessStore) Get(pid uint32)(ProcessEntry,bool){
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	p,exists := s.processes[pid]
-	return p,exists
+	if !exists{
+		return ProcessEntry{},false
+	}
+	return *p,true
 }
 //Sterge procesul la iesire
 func (s *ProcessStore) Remove(pid uint32){
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.processes,pid)
+}
+
+func (s *ProcessStore) Add(pid uint32,ppid uint32,comm string){
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	   if p, ok := s.processes[pid]; ok {
+        p.Ppid = ppid
+        p.Comm = comm
+        return
+    }
+	s.processes[pid] = &ProcessEntry{Pid:pid,Ppid:ppid,Comm:comm}
 }
 //actualizeaza contorul pentru scrieri la ransomeware
 func (s *ProcessStore) UpdateFileWrite(pid uint32,comm string,filename string,timeWindow time.Duration)(int,bool){

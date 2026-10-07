@@ -147,7 +147,12 @@ func Start(ctx context.Context) error {
 		log.Fatalf("Erroare deschidere Exit RingBuffer: %v", err)
 	}
 	defer rbEdrExit.Close()
-
+	
+	rbEdrConsumer,err := ringbuf.NewReader(edrObjs.Rb)
+	if err != nil{
+		log.Fatalf("Erroare deschidere Consumer RingBuffer: %v",err)
+	}
+	defer rbEdrConsumer.Close()
 	rbRootkit, err := ringbuf.NewReader(rootkitObjs.Rb)
 	if err != nil {
 		log.Fatalf("Erroare deschidere Rootkit RingBuffer: %v", err)
@@ -248,6 +253,19 @@ func Start(ctx context.Context) error {
 				continue
 			}
 			procStore.Remove(event.Pid)
+		}
+	}()
+	go func(){
+		var event edrEvent
+		for{
+			record,err := rbEdrConsumer.Read()
+			if err != nil{
+				return
+			}
+			if err := binary.Read(bytes.NewBuffer(record.RawSample),binary.LittleEndian,&event);err != nil{
+				continue
+			}
+			procStore.Add(event.Pid,event.Ppid,int8ToString(event.Comm[:]))
 		}
 	}()
 
