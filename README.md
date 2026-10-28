@@ -1,4 +1,4 @@
-# NETRA — eBPF-based EDR/NDR with an Integrated Go (Wails) UI
+# NETRA — eBPF-based EDR/NDR with an Integrated Go (Wails) UI  [OUTDATED]
 
 ![NETRA Dashboard](Images/Image1.png)
 
